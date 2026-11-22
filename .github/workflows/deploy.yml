@@ -1,0 +1,73 @@
+name: Deploy Pages
+
+# The site is the static files in site/ plus every asset of the `media`
+# release, served under v/. Videos never enter git: a release asset can be
+# replaced without growing the repository's history forever.
+#
+# Uploading an asset fires no event, so run this workflow by hand afterwards:
+#   gh workflow run deploy.yml --repo sy-tools/sy-help
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Fetch videos from the media release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/v
+          gh release download media --repo "$GITHUB_REPOSITORY" --dir site/v
+          shopt -s nullglob
+          files=(site/v/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::the media release has no assets"
+            exit 1
+          fi
+          # Every published name must be an opaque id: a descriptive file name
+          # would announce what the video is to anyone who sees the URL.
+          for f in "${files[@]}"; do
+            name=$(basename "$f")
+            if ! [[ "$name" =~ ^[a-z0-9]{12}\.mp4$ ]]; then
+              echo "::error::asset '$name' is not an opaque id (^[a-z0-9]{12}\.mp4\$); refusing to publish it"
+              exit 1
+            fi
+          done
+          # GitHub Pages refuses a published site over 1 GB.
+          size_mib=$(du -sm site | cut -f1)
+          echo "site: ${size_mib} MiB, ${#files[@]} videos"
+          if [ "$size_mib" -ge 1000 ]; then
+            echo "::error::site is ${size_mib} MiB; GitHub Pages caps a site at 1 GB"
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v5
