@@ -155,6 +155,9 @@ jobs:
           # The job's own read-only token, so the action does not mint one of
           # its GitHub App's over OIDC: the agent needs no write to GitHub.
           github_token: ${{ github.token }}
+          # ingest.yml dispatches this run with GITHUB_TOKEN, so its actor is
+          # the github-actions bot, which the action refuses unless named.
+          allowed_bots: github-actions
           path_to_bun_executable: ${{ steps.tools.outputs.bun }}
           path_to_claude_code_executable: ${{ steps.tools.outputs.claude }}
           # Least privilege: the text comes from recognised speech, and the
