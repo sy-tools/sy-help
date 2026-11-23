@@ -50,4 +50,9 @@ holds about 9 hours of video. The deploy fails before it crosses that limit.
    (to retire one: `gh release delete-asset media <id>.mp4 --repo sy-tools/sy-help`).
 3. `gh workflow run deploy.yml --repo sy-tools/sy-help`. An asset upload fires
    no workflow, so the deploy has to be started by hand.
-4. Point the portal at the new id.
+4. List it in the portal: in `sy-subtitles`, add an entry to
+   `site/js/help_videos.js` with the ref
+   `node -e "console.log(require('./site/js/help_videos.js').encodeHelpRef('<id>'))"`
+   prints (the portal stores refs, never ids). Merging that change starts
+   `help-subtitles.yml`, which writes the Ukrainian and English subtitles for
+   every listed video that has none yet.
