@@ -1,58 +1,102 @@
 # sy-help
 
-Video hosting for the tutorials embedded in the
-[SY Subtitles portal](https://sy-tools.github.io/sy-subtitles/).
-The videos are served by GitHub Pages at
-`https://sy-tools.github.io/sy-help/v/<id>.mp4`, which is the same origin as
-the portal.
+Everything about the video tutorials of the
+[SY Subtitles portal](https://sy-tools.github.io/sy-subtitles/): what they are,
+the video files, their subtitles and the pipeline that writes them. The portal
+only renders what this repository publishes.
+
+The owner manages it from the portal: the help sheet's **Edit** mode (shown to
+whoever can push here) edits texts and order and adds, replaces or removes
+videos. Nothing below needs doing by hand in normal use.
+
+## What is where
+
+| What | Where |
+|---|---|
+| Sections, order, titles, descriptions, notes, durations, subtitle languages | `catalog.json` (`tools/catalog.py` is its model and validator) |
+| Videos | release `media`, as `<file>.bin` (scrambled) |
+| Subtitles | `subs/<file>.<lang>.vtt` |
+| Published site | `https://sy-tools.github.io/sy-help/`: `catalog.json`, `subs/`, `v/<file>.mp4` |
+
+The portal and this site share the origin `sy-tools.github.io`, so the portal
+reads the catalog and the subtitle tracks without CORS.
 
 ## Why this shape
 
-- **GitHub Pages, not release download links.** A release asset is served as
-  `application/octet-stream`, and Safari, and so every browser on an iPhone,
-  will not play it in a `<video>` element. Pages serves `video/mp4` and answers
-  range requests, so seeking works everywhere.
-- **Videos live in the `media` release, not in git.** The deploy workflow
-  downloads every asset of that release into `v/` and publishes the site. A
-  video can be replaced without bloating the repository's history.
-- **Names are opaque ids.** A file is named `<12 random [a-z0-9]>.mp4` and
-  carries no title or metadata. The mapping from tutorial to id lives in the
-  portal, encoded the way it stores `video_ref`. The deploy refuses any other
-  name.
+- **Pages, not release download links.** A release asset is served as
+  `application/octet-stream` with `nosniff`, and Safari, and so every browser
+  on an iPhone, will not play it. Pages serves `video/mp4` and answers range
+  requests, so seeking works everywhere.
+- **Videos never enter git**; they live in the `media` release and can be
+  replaced without growing the history forever.
+- **Scrambled in the release.** A plain mp4 on the release page opens in a
+  player with one click. `tools/scramble.py` XORs it with a fixed keystream, so
+  the `.bin` is noise to a player; the deploy restores the mp4. This is
+  obfuscation, not secrecy: the key is in this public repository, and the
+  published mp4 is public at its URL. The portal hides the tutorials behind its
+  passphrase gate, which is just as soft.
+- **Only catalogued files are published.** The deploy decodes the assets the
+  catalog lists and nothing else, so a replaced or removed recording stops
+  being public with the next deploy.
+- **A file name never changes content.** Browsers and the Pages CDN cache by
+  URL, so a replacement gets a new name (`intro` → `intro-v2`). A removed
+  video's asset stays in the release, unpublished, so its name is never
+  handed to another recording.
 
-This is **obfuscation, not secrecy**: the repository is public (Pages on a free
-plan requires it), so anyone can list the release or find a URL in the
-browser's developer tools. It keeps the videos from being discoverable by
-name or by search engines (`robots.txt` disallows everything), and nothing
-more.
+## How a video gets here
 
-## Encoding
+The portal's admin cannot upload a release asset: `uploads.github.com`
+answers no CORS preflight, and neither does Git LFS. `api.github.com` does,
+and accepts a blob of up to about 40 MiB. So the admin cuts the raw file into
+30 MiB parts and commits them, with `inbox/entry.json`, to a branch
+`inbox/<file>`. Then:
 
-Every video is H.264 + AAC with the index at the front of the file, so it
-plays in every browser and starts before it has downloaded:
+1. **`ingest.yml`** (on that push) rebuilds the file, checks each part's size and
+   SHA-256, encodes it (below), uploads it scrambled to `media`, adds the entry
+   to `catalog.json` on `main`, deletes the branch, and dispatches the next two.
+   It holds no secret: its branch was written from a browser.
+2. **`deploy.yml`** lays out the site with `tools/publish.py` and publishes it.
+   The video is live a few minutes after the upload.
+3. **`subtitles.yml`** writes Ukrainian and English subtitles (whisper cuts the
+   cues, Claude writes each cue's text, `tools/help_subtitles.py` puts it back
+   on the timings), commits `subs/`, records the languages in the catalog, and
+   deploys again. Only this workflow holds `CLAUDE_CODE_OAUTH_TOKEN`, through
+   the `main` environment, which accepts runs from `main` alone.
+
+A failed ingest leaves its branch, and so the upload: re-run it from Actions.
+
+Encode recipe (screen recordings come out at about 2 MiB per minute, so the
+1 GB Pages limit holds about 9 hours; the deploy fails before crossing it):
 
 ```bash
 ffmpeg -i in.mp4 -map 0:v:0 -map 0:a:0 -r 30 \
   -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -profile:v high \
-  -c:a aac -b:a 96k -ac 1 -map_metadata -1 -movflags +faststart <id>.mp4
+  -c:a aac -b:a 96k -ac 1 -map_metadata -1 -movflags +faststart out.mp4
 ```
 
-Screen recordings come out at about 2 MiB per minute, so the 1 GB Pages limit
-holds about 9 hours of video. The deploy fails before it crosses that limit.
+## By hand
 
-## Adding or replacing a video
+```bash
+python -m tools.catalog validate                     # what CI checks
+gh workflow run subtitles.yml -f select=all          # redo every subtitle
+gh workflow run deploy.yml                           # republish
+python -m tools.scramble in.mp4 out.bin              # same command both ways
+```
 
-1. Encode it as above, under a **new** id (`python3 -c "import secrets,string;
-   print(''.join(secrets.choice(string.ascii_lowercase+string.digits) for _ in
-   range(12)))"`). Never reuse an id for different content: browsers and the
-   Pages CDN cache by URL.
-2. `gh release upload media <id>.mp4 --repo sy-tools/sy-help`
-   (to retire one: `gh release delete-asset media <id>.mp4 --repo sy-tools/sy-help`).
-3. `gh workflow run deploy.yml --repo sy-tools/sy-help`. An asset upload fires
-   no workflow, so the deploy has to be started by hand.
-4. List it in the portal: in `sy-subtitles`, add an entry to
-   `site/js/help_videos.js` with the ref
-   `node -e "console.log(require('./site/js/help_videos.js').encodeHelpRef('<id>'))"`
-   prints (the portal stores refs, never ids). Merging that change starts
-   `help-subtitles.yml`, which writes the Ukrainian and English subtitles for
-   every listed video that has none yet.
+## Staging
+
+`sy-tools/sy-help-staging` is a copy for end-to-end checks of the admin and the
+workflows. Point a local portal at it with
+`python -m tools.serve_auth_local --help-repo sy-tools/sy-help-staging` in
+sy-subtitles. Nothing names the repository: the workflows use
+`github.repository`, and the portal reads its help repository from
+configuration.
+
+## Setup a new copy needs
+
+- Pages: build from GitHub Actions.
+- A release tagged `media`.
+- Environment `main` (deployment branches: `main`) with the secret
+  `CLAUDE_CODE_OAUTH_TOKEN`.
+- The portal's GitHub App (`sy-subtitles-review`) installed on the repository,
+  so the admin can write with the owner's sign-in.

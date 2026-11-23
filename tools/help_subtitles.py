@@ -1,0 +1,225 @@
+"""Subtitles for the tutorial videos (subtitles.yml).
+
+    python -m tools.help_subtitles cues --whisper W.json --out cues.json
+    python -m tools.help_subtitles vtt --cues cues.json --texts uk.json --out subs/FILE.uk.vtt
+    python -m tools.help_subtitles ui-strings --index portal/site/index.html --out ui.json
+    python -m tools.help_subtitles meta --file FILE --out meta.json
+    python -m tools.help_subtitles pending --select missing
+
+The timing is decided here and only here: `cues` cuts whisper's words into
+cues, an LLM rewrites the text of each cue (fixing the recognition, then
+translating), and `vtt` puts those texts back on the very same timings. The
+LLM never sees or writes a timestamp, the way build_map keeps it out of SRTs.
+"""
+
+import argparse
+import json
+import re
+from pathlib import Path
+
+from tools import catalog
+
+MAX_CUE_CHARS = 84  # two lines of 42, the reading width the talk subtitles use
+MAX_CUE_SECONDS = 7.0
+MIN_CUE_SECONDS = 1.0  # a cue shorter than this flashes past unread
+PAUSE_SECONDS = 1.0  # a silence this long ends the cue in progress
+SENTENCE_CHARS = 20  # a sentence end closes a cue only once it holds this much
+CUE_GAP_SECONDS = 0.05
+MAX_TEXT_CHARS = 120  # a rewritten cue may run longer than the cut, not much longer
+
+# Whisper hands back the tail of a word split at an apostrophe or a hyphen as
+# a word of its own ("ім" + "'я", "будь" + "-якого"). The tail carries no
+# leading space in whisper's own text, but whisper_run strips that away, so
+# the mark at its start is what tells it apart.
+_WORD_TAIL = re.compile(r"^['’ʼ\-]\w")
+_SENTENCE_END = re.compile(r"[.?!…]['\"»)]*$")
+_I18N_BLOCK = re.compile(r"^var I18N = \{\n(.*?)^\};", re.S | re.M)
+_I18N_LANG = re.compile(r"^  (?P<lang>[a-z]{2}): \{\n(?P<body>.*?)^  \},?$", re.S | re.M)
+_I18N_ENTRY = re.compile(r"^    '(?P<key>[^']+)': '(?P<value>(?:[^'\\]|\\.)*)',?$", re.M)
+_JS_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})|\\(.)")
+LANGS = ("uk", "en")
+
+
+def is_hallucination(text):
+    """Whisper's filler when it hears nothing: empty, or only dots and ellipses."""
+    t = text.strip()
+    return not t or all(c in ".… " for c in t)
+
+
+def _words(whisper):
+    for segment in whisper.get("segments", []):
+        for w in segment.get("words") or []:
+            text = w["word"].strip()
+            if text and not is_hallucination(text):
+                yield {"start": float(w["start"]), "end": float(w["end"]), "text": text}
+
+
+def build_cues(whisper):
+    cues = []
+    cue = None
+    for word in _words(whisper):
+        if _WORD_TAIL.match(word["text"]) and (cue is not None or cues):
+            whole = cue if cue is not None else cues[-1]
+            whole["text"] += word["text"]
+            whole["end"] = word["end"]
+            continue
+        if not any(ch.isalnum() for ch in word["text"]):
+            # Punctuation whisper heard as a word ("–", "..."): it belongs to the
+            # sentence it was said in, and alone after a pause it is not speech
+            # at all, so it never opens a cue of its own.
+            if cue is not None and word["start"] - cue["end"] < PAUSE_SECONDS:
+                cue["text"] += " " + word["text"]
+                cue["end"] = word["end"]
+            continue
+        if cue is not None:
+            text = cue["text"] + " " + word["text"]
+            if (
+                word["start"] - cue["end"] >= PAUSE_SECONDS
+                or len(text) > MAX_CUE_CHARS
+                or word["end"] - cue["start"] > MAX_CUE_SECONDS
+            ):
+                cues.append(cue)
+                cue = None
+            else:
+                cue["text"] = text
+                cue["end"] = word["end"]
+        if cue is None:
+            cue = dict(word)
+        if _SENTENCE_END.search(cue["text"]) and len(cue["text"]) >= SENTENCE_CHARS:
+            cues.append(cue)
+            cue = None
+    if cue is not None:
+        cues.append(cue)
+
+    for i, c in enumerate(cues):
+        if c["end"] - c["start"] < MIN_CUE_SECONDS:
+            limit = cues[i + 1]["start"] - CUE_GAP_SECONDS if i + 1 < len(cues) else float("inf")
+            c["end"] = max(c["end"], min(c["start"] + MIN_CUE_SECONDS, limit))
+        c["start"], c["end"] = round(c["start"], 3), round(c["end"], 3)
+    return cues
+
+
+def _timestamp(seconds):
+    ms = round(seconds * 1000)
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+def render_vtt(cues, texts):
+    if len(texts) != len(cues):
+        raise ValueError(f"{len(cues)} cues but {len(texts)} texts")
+    blocks = ["WEBVTT\n"]
+    for n, (cue, text) in enumerate(zip(cues, texts, strict=True), start=1):
+        if not isinstance(text, str):
+            raise ValueError(f"cue {n} is not text: {text!r}")
+        text = text.strip()
+        if not text:
+            raise ValueError(f"cue {n} is empty")
+        if "-->" in text:
+            raise ValueError(f"cue {n} contains '-->'")
+        if re.search(r"\n\s*\n", text):
+            raise ValueError(f"cue {n} contains a blank line, which would end the cue early")
+        if len(text) > MAX_TEXT_CHARS:
+            raise ValueError(f"cue {n} is {len(text)} characters (max {MAX_TEXT_CHARS})")
+        blocks.append(f"{n}\n{_timestamp(cue['start'])} --> {_timestamp(cue['end'])}\n{text}\n")
+    return "\n".join(blocks)
+
+
+def ui_strings(index_html):
+    """The portal's interface strings, key -> {lang: text}.
+
+    A tutorial names buttons and labels as the reader sees them, so the
+    subtitles must quote them exactly, in either language.
+    """
+    block = _I18N_BLOCK.search(Path(index_html).read_text(encoding="utf-8"))
+    if not block:
+        raise ValueError(f"no `var I18N = {{` block in {index_html}")
+    strings = {}
+    for lang in _I18N_LANG.finditer(block.group(1)):
+        for entry in _I18N_ENTRY.finditer(lang["body"]):
+            text = _JS_ESCAPE.sub(lambda m: chr(int(m[1], 16)) if m[1] else m[2], entry["value"])
+            strings.setdefault(entry["key"], {})[lang["lang"]] = text
+    return dict(sorted(strings.items()))
+
+
+def pending(cat, select):
+    """The files a run should subtitle: `missing` (short of any language),
+    `all`, or a comma-separated list of catalogued files."""
+    files = catalog.files(cat)
+    if select == "all":
+        return files
+    if select == "missing":
+        have = {v["file"]: set(v.get("subtitles", [])) for v in catalog.videos(cat)}
+        return [f for f in files if not set(LANGS) <= have[f]]
+    chosen = [f.strip() for f in select.split(",") if f.strip()]
+    unknown = [f for f in chosen if f not in files]
+    if unknown:
+        raise ValueError("not a catalogued video: " + ", ".join(unknown))
+    return chosen
+
+
+def meta(cat, file):
+    """What the subtitle writer is told about the video: its Ukrainian title."""
+    for section in cat["sections"]:
+        for v in section["videos"]:
+            if v["file"] == file:
+                title = (v.get("title") or {}).get("uk")
+                if not title and v.get("date"):
+                    y, m, d = v["date"].split("-")
+                    title = f"Оновлення на {d}.{m}.{y}"
+                return {"title": title or file, "file": file}
+    raise KeyError(f"no video '{file}'")
+
+
+def _read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _write(path, text):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(text, encoding="utf-8")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("cues", help="cut whisper words into timed cues")
+    p.add_argument("--whisper", required=True)
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("vtt", help="put one text per cue onto the cue timings")
+    p.add_argument("--cues", required=True)
+    p.add_argument("--texts", required=True, help="JSON array, one string per cue")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("ui-strings", help="the portal's interface strings in both languages")
+    p.add_argument("--index", required=True)
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("pending", help="print the files to subtitle, as a JSON array")
+    p.add_argument("--catalog", default=catalog.DEFAULT_PATH)
+    p.add_argument("--select", default="missing", help="missing | all | file,file,...")
+    p = sub.add_parser("meta", help="write meta.json for the subtitle writer")
+    p.add_argument("--catalog", default=catalog.DEFAULT_PATH)
+    p.add_argument("--file", required=True)
+    p.add_argument("--out", required=True)
+    args = parser.parse_args(argv)
+
+    if args.command == "cues":
+        cues = build_cues(_read_json(args.whisper))
+        _write(args.out, json.dumps(cues, ensure_ascii=False, indent=1) + "\n")
+        print(f"{len(cues)} cues -> {args.out}")
+    elif args.command == "vtt":
+        _write(args.out, render_vtt(_read_json(args.cues), _read_json(args.texts)))
+        print(f"wrote {args.out}")
+    elif args.command == "ui-strings":
+        strings = ui_strings(args.index)
+        _write(args.out, json.dumps(strings, ensure_ascii=False, indent=1) + "\n")
+        print(f"{len(strings)} interface strings -> {args.out}")
+    elif args.command == "pending":
+        print(json.dumps(pending(catalog.load(args.catalog), args.select)))
+    else:
+        _write(args.out, json.dumps(meta(catalog.load(args.catalog), args.file), ensure_ascii=False) + "\n")
+
+
+if __name__ == "__main__":
+    main()

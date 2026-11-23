@@ -1,0 +1,246 @@
+name: Subtitles
+
+# Ukrainian and English subtitles for the catalogued videos. Whisper cuts the
+# speech into timed cues, Claude writes the text of each cue
+# (templates/help_subtitles_prompt.md), and tools.help_subtitles puts those
+# texts back on the same timings as subs/<file>.<lang>.vtt. The catalog then
+# records the languages and the site is redeployed.
+#
+# ingest.yml dispatches this for each video it publishes; dispatch it by hand
+# with select=all, or a list of files, to redo some.
+#
+# Only the subtitles job holds the Claude token, through the `main`
+# environment, which accepts runs from main alone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      select:
+        description: 'missing (videos short of a language), all, or a comma-separated list of files'
+        type: string
+        default: missing
+      model:
+        description: 'Claude model that writes the subtitles'
+        type: choice
+        options:
+          - claude-opus-5-5
+          - claude-fable-5-2
+          - claude-sonnet-5
+        default: claude-opus-5-5
+
+permissions:
+  contents: read
+
+concurrency:
+  group: subtitles
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.pending.outputs.files }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: List the videos to subtitle
+        id: pending
+        env:
+          SELECT: ${{ inputs.select }}
+        run: |
+          set -euo pipefail
+          FILES=$(python -m tools.help_subtitles pending --select "$SELECT")
+          echo "To subtitle: $FILES"
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+
+  subtitles:
+    needs: discover
+    if: needs.discover.outputs.files != '[]'
+    environment: main
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        file: ${{ fromJson(needs.discover.outputs.files) }}
+      fail-fast: false
+      max-parallel: 4
+    env:
+      FILE: ${{ matrix.file }}
+      WORK: help-work
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The portal: its whisper runner and pins, its interface strings (so the
+      # subtitles name buttons as the reader sees them) and its glossary.
+      - name: Check out the portal
+        uses: actions/checkout@v7
+        with:
+          repository: sy-tools/sy-subtitles
+          path: portal
+          sparse-checkout: |
+            tools
+            glossary
+            site/index.html
+            requirements-whisper.txt
+
+      - name: Verify the Claude token
+        run: |
+          if [ -z "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" ]; then
+            echo "::error::secret CLAUDE_CODE_OAUTH_TOKEN of the main environment is missing or empty"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-whisper-${{ hashFiles('portal/requirements-whisper.txt') }}
+          restore-keys: pip-whisper-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          pip install -r portal/requirements-whisper.txt
+
+      - name: Cache Whisper model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface/hub
+          key: faster-whisper-medium
+
+      # From the release, not from Pages: the deploy that publishes a new video
+      # runs at the same time as this.
+      - name: Fetch the video
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/help
+          gh release download media --repo "$GITHUB_REPOSITORY" --pattern "$FILE.bin" --dir /tmp/help
+          python -m tools.scramble "/tmp/help/$FILE.bin" /tmp/help/video.mp4
+
+      - name: Cut the speech into cues
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          (cd portal && python -m tools.whisper_run --video /tmp/help/video.mp4 --output "$GITHUB_WORKSPACE/$WORK/whisper.json" --model medium --language uk)
+          python -m tools.help_subtitles cues --whisper "$WORK/whisper.json" --out "$WORK/cues.json"
+          python -m tools.help_subtitles ui-strings --index portal/site/index.html --out "$WORK/ui.json"
+          python -m tools.help_subtitles meta --file "$FILE" --out "$WORK/meta.json"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
+
+      - name: Install Claude Code
+        run: bun install -g @anthropic-ai/claude-code@latest
+
+      - name: Resolve executable paths
+        id: tools
+        run: |
+          echo "bun=$(which bun)" >> "$GITHUB_OUTPUT"
+          echo "claude=$(which claude)" >> "$GITHUB_OUTPUT"
+
+      - name: Write the subtitle texts
+        uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8  # v1.0.275
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The job's own read-only token, so the action does not mint one of
+          # its GitHub App's over OIDC: the agent needs no write to GitHub.
+          github_token: ${{ github.token }}
+          # ingest.yml dispatches this run with GITHUB_TOKEN, so its actor is
+          # the github-actions bot, which the action refuses unless named.
+          allowed_bots: github-actions
+          path_to_bun_executable: ${{ steps.tools.outputs.bun }}
+          path_to_claude_code_executable: ${{ steps.tools.outputs.claude }}
+          # Least privilege: the text comes from recognised speech, and the
+          # agent only reads and writes two JSON files. No shell means nothing
+          # in the job's environment (the OAuth token) is within its reach.
+          claude_args: >-
+            --max-turns 40 --effort high --model ${{ inputs.model }}
+            --allowedTools "Read,Glob,Grep,Edit(help-work/**),Write(help-work/**)"
+            --disallowedTools "Bash,WebFetch,WebSearch"
+          show_full_output: true
+          prompt: |
+            Read templates/help_subtitles_prompt.md and follow it.
+            The work directory is help-work/.
+
+      - name: Put the texts on the cue timings
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for lang in uk en; do
+            python -m tools.help_subtitles vtt --cues "$WORK/cues.json" --texts "$WORK/$lang.json" --out "out/$FILE.$lang.vtt"
+          done
+
+      - name: Upload the subtitles
+        uses: actions/upload-artifact@v7
+        with:
+          # '__' delimits, as in the portal's workflows' artifact names.
+          name: subs__${{ matrix.file }}
+          path: out/*.vtt
+          if-no-files-found: error
+          retention-days: 7
+
+  commit:
+    needs: [discover, subtitles]
+    # Land what succeeded even when another video failed.
+    if: always() && !cancelled() && needs.discover.outputs.files != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Collect the subtitles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: subs__*
+          merge-multiple: true
+          path: /tmp/subs
+
+      - name: Commit them and record them in the catalog
+        run: |
+          set -euo pipefail
+          if ! ls /tmp/subs/*.vtt >/dev/null 2>&1; then
+            echo "::error::no video got subtitles in this run"
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for try in 1 2 3; do
+            git fetch -q origin main
+            git checkout -q -B main origin/main
+            mkdir -p subs
+            cp /tmp/subs/*.vtt subs/
+            for f in $(ls /tmp/subs | sed -E 's/\.[a-z]{2}\.vtt$//' | sort -u); do
+              # A video removed from the catalog while this ran: drop its files.
+              if ! python -m tools.catalog set-subtitles "$f" "$(ls /tmp/subs | sed -nE "s/^$f\.([a-z]{2})\.vtt$/\1/p" | sort | paste -sd, -)"; then
+                rm -f "subs/$f".*.vtt
+              fi
+            done
+            git add subs catalog.json
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -q -m "Add subtitles" -m "From run $GITHUB_RUN_ID."
+            if git push -q origin main; then
+              gh workflow run deploy.yml --ref main --repo "$GITHUB_REPOSITORY"
+              exit 0
+            fi
+            echo "::warning::main moved; trying again"
+          done
+          exit 1

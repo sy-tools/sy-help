@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Test
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Validate the catalog
+        run: |
+          if [ -f catalog.json ]; then python -m tools.catalog validate catalog.json; fi

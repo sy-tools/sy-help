@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "guide",
+      "title": {
+        "uk": "Як працювати з порталом",
+        "en": "How to work with the portal"
+      },
+      "order": "manual",
+      "videos": [
+        {
+          "file": "motivation-and-limits",
+          "title": {
+            "uk": "Мотивація та обмеження",
+            "en": "Motivation and limitations"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 335.9,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "components-github-glossary-automation",
+          "title": {
+            "uk": "Компоненти: GitHub, словник, автоматизація",
+            "en": "Components: GitHub, glossary, automation"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 951.1,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "components-translation-portal",
+          "title": {
+            "uk": "Компоненти: портал перекладу",
+            "en": "Components: the translation portal"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 682.1,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "security",
+          "title": {
+            "uk": "Безпека",
+            "en": "Security"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 432.4,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "github-sign-up",
+          "title": {
+            "uk": "Реєстрація на GitHub",
+            "en": "Signing up on GitHub"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 87.7,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "taking-material-into-work",
+          "title": {
+            "uk": "Як взяти матеріал у роботу",
+            "en": "How to take material into work"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 148.6,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "adding-materials-and-autotranslation",
+          "title": {
+            "uk": "Додавання нових матеріалів та автопереклад",
+            "en": "Adding new materials and auto-translation"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 405.7,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "view-translation-mode",
+          "title": {
+            "uk": "Робота в режимі «Переглянути переклад»",
+            "en": "Working in “View translation” mode"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 631.6,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "review-translation-mode",
+          "title": {
+            "uk": "Робота в режимі «Перевірити переклад»",
+            "en": "Working in “Review translation” mode"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 642.0,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "finalization-and-amruta-delivery",
+          "title": {
+            "uk": "Фіналізація, публікація на Амруту",
+            "en": "Finalization and publishing to Amruta"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 329.9,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "login",
+          "title": {
+            "uk": "Login",
+            "en": "Login"
+          },
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "duration": 613.7,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "updates",
+      "title": {
+        "uk": "Оновлення",
+        "en": "Updates"
+      },
+      "order": "chronological",
+      "videos": [
+        {
+          "file": "update-2026-09-05",
+          "date": "2026-09-05",
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "notes": {
+            "uk": [
+              "Меню налаштувань",
+              "Автоматичні виправлення описок",
+              "Підсвітка описок"
+            ],
+            "en": [
+              "Settings menu",
+              "Automatic typo fixes",
+              "Typo highlighting"
+            ]
+          },
+          "duration": 361.1,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        },
+        {
+          "file": "update-2026-11-22",
+          "date": "2026-11-22",
+          "description": {
+            "uk": "",
+            "en": ""
+          },
+          "notes": {
+            "uk": [
+              "Зміна розміру субтитрів у повноекранному режимі.",
+              "Додавання міток редагування у повноекранному режимі.",
+              "Збереження файлу субтитрів.",
+              "Створення відео із вбудованими субтитрами, в т.ч. уривків, які можна використовувати офлайн."
+            ],
+            "en": [
+              "Resizing subtitles in fullscreen.",
+              "Adding edit markers in fullscreen.",
+              "Saving the subtitle file.",
+              "Making videos with burned-in subtitles, including clips you can use offline."
+            ]
+          },
+          "duration": 595.8,
+          "subtitles": [
+            "uk",
+            "en"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+name: Ingest
+
+# A video the portal's help admin uploaded: the browser committed it as 30 MiB
+# parts to an inbox/<file> branch (a browser cannot upload a release asset).
+# This rebuilds and checks the file, encodes it, puts it scrambled into the
+# `media` release, adds it to catalog.json on main, deletes the branch, and
+# starts the deploy and the subtitles.
+#
+# No environment and no secrets: the branch is written from a browser, so this
+# run must never hold the Claude token. subtitles.yml, dispatched on main,
+# does that work. A failed run leaves the branch, and with it the upload, so a
+# re-run (Actions → Re-run) picks up where it stopped.
+
+on:
+  push:
+    branches: ['inbox/**']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ingest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: github.event.deleted != true
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Read the upload
+        id: entry
+        run: |
+          set -euo pipefail
+          FILE=$(jq -r .file inbox/entry.json)
+          REPLACES=$(jq -r '.replaces // ""' inbox/entry.json)
+          # Checked before anything is published under these names.
+          SLUG='^[a-z0-9]+(-[a-z0-9]+)*$'
+          if ! [[ "$FILE" =~ $SLUG ]] || { [ -n "$REPLACES" ] && ! [[ "$REPLACES" =~ $SLUG ]]; }; then
+            echo "::error::entry.json names a file that is not a lowercase slug"
+            exit 1
+          fi
+          if [ "inbox/$FILE" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::branch $GITHUB_REF_NAME carries entry.json for '$FILE'"
+            exit 1
+          fi
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "replaces=$REPLACES" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild and check the uploaded file
+        run: python -m tools.ingest assemble --inbox inbox --out /tmp/raw.video
+
+      - name: Encode
+        id: encode
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          # The recipe in README.md: H.264 + AAC, index first, so it plays
+          # everywhere and starts before it has downloaded.
+          ffmpeg -nostdin -loglevel error -i /tmp/raw.video -map 0:v:0 -map 0:a:0? -r 30 \
+            -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -profile:v high \
+            -c:a aac -b:a 96k -ac 1 -map_metadata -1 -movflags +faststart /tmp/out.mp4
+          DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/out.mp4)
+          echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+          ls -l /tmp/out.mp4
+
+      - name: Put it scrambled into the media release
+        env:
+          FILE: ${{ steps.entry.outputs.file }}
+        run: |
+          set -euo pipefail
+          python -m tools.scramble /tmp/out.mp4 "/tmp/$FILE.bin"
+          gh release upload media "/tmp/$FILE.bin" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Add it to the catalog on main
+        env:
+          FILE: ${{ steps.entry.outputs.file }}
+          REPLACES: ${{ steps.entry.outputs.replaces }}
+          DURATION: ${{ steps.encode.outputs.duration }}
+        run: |
+          set -euo pipefail
+          cp -r inbox /tmp/inbox-entry && rm -rf /tmp/inbox-entry/parts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Someone may commit to main meanwhile (the admin saving texts):
+          # start from the latest main on every try.
+          for try in 1 2 3; do
+            git fetch -q origin main
+            git checkout -q -B main origin/main
+            python -m tools.ingest apply --inbox /tmp/inbox-entry --duration "$DURATION" --catalog catalog.json
+            if [ -n "$REPLACES" ]; then git rm -q --ignore-unmatch "subs/$REPLACES".*.vtt; fi
+            git add catalog.json
+            # A re-run after this step already landed has nothing to commit.
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -q -m "Publish $FILE" -m "From the help admin's upload on $GITHUB_REF_NAME."
+            if git push -q origin main; then exit 0; fi
+            echo "::warning::main moved; trying again"
+          done
+          exit 1
+
+      - name: Retire the replaced recording
+        if: steps.entry.outputs.replaces != ''
+        env:
+          REPLACES: ${{ steps.entry.outputs.replaces }}
+        run: gh release delete-asset media "$REPLACES.bin" --yes --repo "$GITHUB_REPOSITORY" || echo "::notice::no $REPLACES.bin to delete"
+
+      - name: Delete the inbox branch
+        run: git push -q origin --delete "$GITHUB_REF_NAME"
+
+      - name: Deploy, then write the subtitles
+        run: |
+          set -euo pipefail
+          gh workflow run deploy.yml --ref main --repo "$GITHUB_REPOSITORY"
+          # `missing`, not this file: GitHub keeps one pending run per
+          # concurrency group, so a run asked for one video can be replaced
+          # by the next upload's and that video would never get subtitles.
+          gh workflow run subtitles.yml --ref main --repo "$GITHUB_REPOSITORY" -f select=missing

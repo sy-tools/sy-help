@@ -1,11 +1,12 @@
 name: Deploy Pages
 
-# The site is the static files in site/ plus every asset of the `media`
-# release, served under v/. Videos never enter git: a release asset can be
-# replaced without growing the repository's history forever.
+# The site is site/ plus what tools.publish lays out: catalog.json, subs/, and
+# every video the catalog lists, decoded from its scrambled asset in the
+# `media` release to v/<file>.mp4. Videos never enter git, and the release
+# holds only .bin files a player cannot open.
 #
-# Uploading an asset fires no event, so run this workflow by hand afterwards:
-#   gh workflow run deploy.yml --repo sy-tools/sy-help
+# A push by GITHUB_TOKEN fires no workflow, so ingest.yml and subtitles.yml
+# dispatch this one after they commit.
 
 on:
   push:
@@ -33,31 +34,22 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
-      - name: Fetch videos from the media release
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Lay out the site from the catalog and the media release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p site/v
-          gh release download media --repo "$GITHUB_REPOSITORY" --dir site/v
-          shopt -s nullglob
-          files=(site/v/*)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::the media release has no assets"
-            exit 1
-          fi
-          # Every published name must be an opaque id: a descriptive file name
-          # would announce what the video is to anyone who sees the URL.
-          for f in "${files[@]}"; do
-            name=$(basename "$f")
-            if ! [[ "$name" =~ ^[a-z0-9]{12}\.mp4$ ]]; then
-              echo "::error::asset '$name' is not an opaque id (^[a-z0-9]{12}\.mp4\$); refusing to publish it"
-              exit 1
-            fi
-          done
+          mkdir -p /tmp/assets
+          gh release download media --repo "$GITHUB_REPOSITORY" --dir /tmp/assets
+          python -m tools.publish --catalog catalog.json --assets /tmp/assets --subs subs --out site
           # GitHub Pages refuses a published site over 1 GB.
           size_mib=$(du -sm site | cut -f1)
-          echo "site: ${size_mib} MiB, ${#files[@]} videos"
+          echo "site: ${size_mib} MiB"
           if [ "$size_mib" -ge 1000 ]; then
             echo "::error::site is ${size_mib} MiB; GitHub Pages caps a site at 1 GB"
             exit 1
