@@ -14,20 +14,35 @@ def write_parts(tmp_path, data, size=1000):
     return parts
 
 
+def manifest(data, size=1000):
+    return [{"size": len(data[i:i + size]), "sha256": hashlib.sha256(data[i:i + size]).hexdigest()}
+            for i in range(0, len(data), size)]
+
+
 def test_assemble_joins_the_parts_in_order(tmp_path):
     data = os.urandom(12_345)
     parts = write_parts(tmp_path, data)
     out = tmp_path / "raw"
-    ingest.assemble(parts, out, len(data), hashlib.sha256(data).hexdigest())
+    ingest.assemble(parts, out, len(data), manifest(data))
     assert out.read_bytes() == data
 
 
-@pytest.mark.parametrize("size_delta,sha", [(1, None), (0, "0" * 64)])
-def test_assemble_refuses_a_file_that_is_not_the_one_uploaded(tmp_path, size_delta, sha):
+def test_assemble_refuses_a_part_that_is_not_the_one_uploaded(tmp_path):
+    data = os.urandom(3000)
+    parts = write_parts(tmp_path, data)
+    bad = manifest(data)
+    bad[1]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="part 001"):
+        ingest.assemble(parts, tmp_path / "raw", len(data), bad)
+
+
+def test_assemble_refuses_a_missing_part_or_a_wrong_total(tmp_path):
     data = os.urandom(3000)
     parts = write_parts(tmp_path, data)
     with pytest.raises(ValueError):
-        ingest.assemble(parts, tmp_path / "raw", len(data) + size_delta, sha or hashlib.sha256(data).hexdigest())
+        ingest.assemble(parts, tmp_path / "raw", len(data), manifest(data) + manifest(b"x"))
+    with pytest.raises(ValueError):
+        ingest.assemble(parts, tmp_path / "raw", len(data) + 1, manifest(data))
 
 
 def base():
@@ -41,7 +56,7 @@ def base():
 def entry(**kw):
     e = {"section": "guide", "file": "next", "replaces": None, "title": {"uk": "Далі", "en": "Next"},
          "description": {"uk": "", "en": ""}, "date": None, "notes": {"uk": [], "en": []},
-         "size": 1, "sha256": "x"}
+         "size": 1, "parts": [{"size": 1, "sha256": "x"}]}
     e.update(kw)
     return e
 

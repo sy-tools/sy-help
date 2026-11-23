@@ -49,7 +49,7 @@ and accepts a blob of up to about 40 MiB. So the admin cuts the raw file into
 30 MiB parts and commits them, with `inbox/entry.json`, to a branch
 `inbox/<file>`. Then:
 
-1. **`ingest.yml`** (on that push) rebuilds the file, checks its size and
+1. **`ingest.yml`** (on that push) rebuilds the file, checks each part's size and
    SHA-256, encodes it (below), uploads it scrambled to `media`, adds the entry
    to `catalog.json` on `main`, deletes the branch, and dispatches the next two.
    It holds no secret: its branch was written from a browser.

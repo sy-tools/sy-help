@@ -6,7 +6,7 @@
 The admin cannot upload a release asset from a browser (uploads.github.com
 answers no CORS preflight), so it commits the raw file as 30 MiB parts to an
 `inbox/<file>` branch, with `inbox/entry.json` describing it. This rebuilds the
-file, checks it is the one the browser hashed, and puts the entry into the
+file, checks each part is the one the browser hashed, and puts the entry into the
 catalog once the video is published.
 """
 
@@ -18,22 +18,25 @@ from pathlib import Path
 from tools import catalog
 
 # Fields of entry.json that describe the upload, not the tutorial.
-UPLOAD_FIELDS = ("section", "replaces", "size", "sha256")
+UPLOAD_FIELDS = ("section", "replaces", "size", "parts")
 
 
-def assemble(parts_dir, out, size, sha256):
-    digest = hashlib.sha256()
+def assemble(parts_dir, out, size, parts):
+    """Join the parts into `out`, checking each against the size and SHA-256
+    the browser recorded for it before sending."""
+    files = sorted(Path(parts_dir).iterdir())
+    if len(files) != len(parts):
+        raise ValueError(f"{len(files)} parts arrived, the upload had {len(parts)}")
     total = 0
     with open(out, "wb") as f:
-        for part in sorted(Path(parts_dir).iterdir()):
-            data = part.read_bytes()
-            digest.update(data)
+        for path, expected in zip(files, parts, strict=True):
+            data = path.read_bytes()
+            if len(data) != expected["size"] or hashlib.sha256(data).hexdigest() != expected["sha256"]:
+                raise ValueError(f"part {path.name} is not the one the browser sent")
             total += len(data)
             f.write(data)
     if total != size:
         raise ValueError(f"the parts add up to {total} bytes, the upload had {size}")
-    if digest.hexdigest() != sha256:
-        raise ValueError(f"sha256 {digest.hexdigest()} is not the upload's {sha256}")
 
 
 def apply(cat, entry, duration):
@@ -56,7 +59,7 @@ def main(argv=None):
 
     entry = json.loads((Path(args.inbox) / "entry.json").read_text(encoding="utf-8"))
     if args.cmd == "assemble":
-        assemble(Path(args.inbox) / "parts", args.out, entry["size"], entry["sha256"])
+        assemble(Path(args.inbox) / "parts", args.out, entry["size"], entry["parts"])
         return
     cat = apply(catalog.load(args.catalog), entry, args.duration)
     errors = catalog.validate(cat)
