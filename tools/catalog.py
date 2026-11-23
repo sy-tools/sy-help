@@ -61,6 +61,9 @@ def validate(cat):
         if sid in section_ids:
             errors.append(f"duplicate section '{sid}'")
         section_ids.add(sid)
+        if not isinstance(section.get("videos"), list):
+            errors.append(f"section '{sid}' has no videos list")
+            continue
         order = section.get("order")
         if order not in ORDERS:
             errors.append(f"section '{sid}' has order '{order}', not one of {', '.join(ORDERS)}")

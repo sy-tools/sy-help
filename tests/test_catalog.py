@@ -81,3 +81,9 @@ def test_dump_is_stable_utf8_json_with_a_trailing_newline():
     assert text.endswith("}\n")
     assert "Назва" in text
     assert catalog.loads(text) == copy.deepcopy(c)
+
+
+def test_validate_flags_a_section_without_a_video_list():
+    c = cat(section("guide", []))
+    del c["sections"][0]["videos"]
+    assert "has no videos list" in "\n".join(catalog.validate(c))

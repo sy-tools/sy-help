@@ -57,3 +57,15 @@ def test_cli_fails_when_a_listed_video_has_no_asset(tmp_path):
     result = run(tmp_path, cat("a"))
     assert result.returncode == 1
     assert "'a'" in result.stdout
+
+
+def test_cli_publishes_subtitles_only_of_catalogued_videos(tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "subs").mkdir()
+    (tmp_path / "assets" / "a.bin").write_bytes(transform(b"v"))
+    (tmp_path / "subs" / "a.uk.vtt").write_text("WEBVTT\n", encoding="utf-8")
+    (tmp_path / "subs" / "gone.uk.vtt").write_text("WEBVTT\n", encoding="utf-8")
+    result = run(tmp_path, cat("a"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "site" / "subs" / "a.uk.vtt").exists()
+    assert not (tmp_path / "site" / "subs" / "gone.uk.vtt").exists()

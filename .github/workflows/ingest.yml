@@ -43,6 +43,12 @@ jobs:
           set -euo pipefail
           FILE=$(jq -r .file inbox/entry.json)
           REPLACES=$(jq -r '.replaces // ""' inbox/entry.json)
+          # Checked before anything is published under these names.
+          SLUG='^[a-z0-9]+(-[a-z0-9]+)*$'
+          if ! [[ "$FILE" =~ $SLUG ]] || { [ -n "$REPLACES" ] && ! [[ "$REPLACES" =~ $SLUG ]]; }; then
+            echo "::error::entry.json names a file that is not a lowercase slug"
+            exit 1
+          fi
           if [ "inbox/$FILE" != "$GITHUB_REF_NAME" ]; then
             echo "::error::branch $GITHUB_REF_NAME carries entry.json for '$FILE'"
             exit 1
@@ -60,7 +66,7 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           # The recipe in README.md: H.264 + AAC, index first, so it plays
           # everywhere and starts before it has downloaded.
-          ffmpeg -nostdin -loglevel error -i /tmp/raw.video -map 0:v:0 -map 0:a:0 -r 30 \
+          ffmpeg -nostdin -loglevel error -i /tmp/raw.video -map 0:v:0 -map 0:a:0? -r 30 \
             -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -profile:v high \
             -c:a aac -b:a 96k -ac 1 -map_metadata -1 -movflags +faststart /tmp/out.mp4
           DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/out.mp4)
@@ -93,6 +99,8 @@ jobs:
             python -m tools.ingest apply --inbox /tmp/inbox-entry --duration "$DURATION" --catalog catalog.json
             if [ -n "$REPLACES" ]; then git rm -q --ignore-unmatch "subs/$REPLACES".*.vtt; fi
             git add catalog.json
+            # A re-run after this step already landed has nothing to commit.
+            if git diff --cached --quiet; then exit 0; fi
             git commit -q -m "Publish $FILE" -m "From the help admin's upload on $GITHUB_REF_NAME."
             if git push -q origin main; then exit 0; fi
             echo "::warning::main moved; trying again"
@@ -109,9 +117,10 @@ jobs:
         run: git push -q origin --delete "$GITHUB_REF_NAME"
 
       - name: Deploy, then write the subtitles
-        env:
-          FILE: ${{ steps.entry.outputs.file }}
         run: |
           set -euo pipefail
           gh workflow run deploy.yml --ref main --repo "$GITHUB_REPOSITORY"
-          gh workflow run subtitles.yml --ref main --repo "$GITHUB_REPOSITORY" -f select="$FILE"
+          # `missing`, not this file: GitHub keeps one pending run per
+          # concurrency group, so a run asked for one video can be replaced
+          # by the next upload's and that video would never get subtitles.
+          gh workflow run subtitles.yml --ref main --repo "$GITHUB_REPOSITORY" -f select=missing

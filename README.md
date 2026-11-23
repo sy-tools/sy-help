@@ -39,7 +39,9 @@ reads the catalog and the subtitle tracks without CORS.
   catalog lists and nothing else, so a replaced or removed recording stops
   being public with the next deploy.
 - **A file name never changes content.** Browsers and the Pages CDN cache by
-  URL, so a replacement gets a new name (`intro` → `intro-2`).
+  URL, so a replacement gets a new name (`intro` → `intro-v2`). A removed
+  video's asset stays in the release, unpublished, so its name is never
+  handed to another recording.
 
 ## How a video gets here
 

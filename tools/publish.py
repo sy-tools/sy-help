@@ -64,8 +64,13 @@ def main(argv=None):
     for f in p["publish"]:
         unscramble([str(Path(args.assets) / f"{f}.bin"), str(out / "v" / f"{f}.mp4")])
     shutil.copyfile(args.catalog, out / "catalog.json")
-    if Path(args.subs).is_dir():
-        shutil.copytree(args.subs, out / "subs", dirs_exist_ok=True)
+    # Only the subtitles of listed videos: a removed one's stay in git
+    # but stop being public with its video.
+    listed = set(catalog.files(cat))
+    (out / "subs").mkdir(exist_ok=True)
+    for vtt in sorted(Path(args.subs).glob("*.vtt")) if Path(args.subs).is_dir() else []:
+        if vtt.name.split(".")[0] in listed:
+            shutil.copyfile(vtt, out / "subs" / vtt.name)
     print(f"published {len(p['publish'])} videos")
 
 
