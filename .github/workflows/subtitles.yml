@@ -152,6 +152,9 @@ jobs:
         uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8  # v1.0.275
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The job's own read-only token, so the action does not mint one of
+          # its GitHub App's over OIDC: the agent needs no write to GitHub.
+          github_token: ${{ github.token }}
           path_to_bun_executable: ${{ steps.tools.outputs.bun }}
           path_to_claude_code_executable: ${{ steps.tools.outputs.claude }}
           # Least privilege: the text comes from recognised speech, and the
@@ -211,6 +214,10 @@ jobs:
       - name: Commit them and record them in the catalog
         run: |
           set -euo pipefail
+          if ! ls /tmp/subs/*.vtt >/dev/null 2>&1; then
+            echo "::error::no video got subtitles in this run"
+            exit 1
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           for try in 1 2 3; do
