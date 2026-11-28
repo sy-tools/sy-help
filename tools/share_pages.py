@@ -74,7 +74,7 @@ def page_title(video):
 def _duration(seconds):
     if not isinstance(seconds, (int, float)):
         return ""
-    total = round(seconds)
+    total = int(seconds + 0.5)  # Math.round, as the portal's formatDuration; round() would go to even
     h, m, s = total // 3600, total % 3600 // 60, total % 60
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
