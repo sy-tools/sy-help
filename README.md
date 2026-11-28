@@ -17,6 +17,7 @@ videos. Nothing below needs doing by hand in normal use.
 | Videos | release `media`, as `<file>.bin` (scrambled) |
 | Subtitles | `subs/<file>.<lang>.vtt` |
 | Published site | `https://sy-tools.github.io/sy-help/`: `catalog.json`, `subs/`, `v/<file>.mp4` |
+| Share links (messenger previews) | `s/<stem>/` on the published site, written by `tools/share_pages.py` |
 
 The portal and this site share the origin `sy-tools.github.io`, so the portal
 reads the catalog and the subtitle tracks without CORS.
@@ -42,6 +43,17 @@ reads the catalog and the subtitle tracks without CORS.
   URL, so a replacement gets a new name (`intro` → `intro-v2`). A removed
   video's asset stays in the release, unpublished, so its name is never
   handed to another recording.
+- **A share link of its own.** The portal opens a tutorial at `#/help/<file>`,
+  and a fragment never reaches a server, so a messenger's crawler sees the
+  same bare portal for every video. `s/<stem>/` is a static page with the
+  video's title and first frame as Open Graph tags, which forwards a person
+  to the portal. The stem drops `-vN`, so a replacement keeps the link.
+  `robots.txt` does not get in the way: a crawler reads only the origin's
+  root `/robots.txt`, and `sy-tools.github.io` has none; `noindex` on the page
+  keeps it out of search results. The same fact means this site's own
+  `robots.txt` blocks nothing. Whoever adds a root one (a
+  `sy-tools.github.io` repository) must keep `Allow: /sy-help/s/` in it, or
+  WhatsApp, which obeys it, stops showing the previews.
 
 ## How a video gets here
 

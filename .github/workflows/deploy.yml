@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup Pages
+        id: pages
         uses: actions/configure-pages@v6
 
       - name: Set up Python
@@ -42,11 +43,14 @@ jobs:
       - name: Lay out the site from the catalog and the media release
         env:
           GH_TOKEN: ${{ github.token }}
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/assets
           gh release download media --repo "$GITHUB_REPOSITORY" --dir /tmp/assets
           python -m tools.publish --catalog catalog.json --assets /tmp/assets --subs subs --out site
+          command -v ffmpeg >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq ffmpeg; }
+          python -m tools.share_pages --site site --help-base "$PAGES_BASE_URL"
           # GitHub Pages refuses a published site over 1 GB.
           size_mib=$(du -sm site | cut -f1)
           echo "site: ${size_mib} MiB"
