@@ -57,10 +57,12 @@ the same rule the portal's `findLinked` applies.
     (Telegram uses it to show the large image);
   - `<meta name="robots" content="noindex">`;
   - a redirect to `https://sy-tools.github.io/sy-subtitles/#/help/<stem>`:
-    `<meta http-equiv="refresh">` as the fallback, plus a `location.replace`
-    that carries the share URL's `?q=`/`?f=` across, so the portal opens over
-    the index the sharer had on screen, as today. A visible link for anyone
-    whose redirect is blocked.
+    a `location.replace` that carries the share URL's `?q=`/`?f=` across, so
+    the portal opens over the index the sharer had on screen, as today. A
+    visible link for anyone whose script is blocked. No
+    `<meta http-equiv="refresh">`: Telegram's crawler follows it to the
+    portal and shows no preview (measured after the first deploy: the same
+    page previews without it and not with it; `noindex` made no difference).
   - All catalog text HTML-escaped.
 
 The portal URL is a constant in `tools.publish` (overridable by flag for

@@ -86,10 +86,10 @@ def test_page_carries_open_graph_tags():
     assert meta(html, "robots") == "noindex"
 
 
-def test_page_redirects_to_portal_help_route():
+def test_page_redirects_by_script_never_by_meta_refresh():
     html = page()
     target = "https://sy-tools.github.io/sy-subtitles/#/help/intro"
-    assert f'<meta http-equiv="refresh" content="0;url={target}">' in html
+    assert "http-equiv" not in html
     assert f'<a href="{target}">' in html
     script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
     assert "URLSearchParams" in script
