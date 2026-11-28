@@ -50,7 +50,10 @@ reads the catalog and the subtitle tracks without CORS.
   to the portal. The stem drops `-vN`, so a replacement keeps the link.
   `robots.txt` does not get in the way: a crawler reads only the origin's
   root `/robots.txt`, and `sy-tools.github.io` has none; `noindex` on the page
-  keeps it out of search results.
+  keeps it out of search results. The same fact means this site's own
+  `robots.txt` blocks nothing. Whoever adds a root one (a
+  `sy-tools.github.io` repository) must keep `Allow: /sy-help/s/` in it, or
+  WhatsApp, which obeys it, stops showing the previews.
 
 ## How a video gets here
 
