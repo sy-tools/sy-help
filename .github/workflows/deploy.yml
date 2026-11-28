@@ -47,6 +47,8 @@ jobs:
           mkdir -p /tmp/assets
           gh release download media --repo "$GITHUB_REPOSITORY" --dir /tmp/assets
           python -m tools.publish --catalog catalog.json --assets /tmp/assets --subs subs --out site
+          command -v ffmpeg >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq ffmpeg; }
+          python -m tools.share_pages --site site
           # GitHub Pages refuses a published site over 1 GB.
           size_mib=$(du -sm site | cut -f1)
           echo "site: ${size_mib} MiB"

@@ -21,6 +21,7 @@ jobs:
 
       - name: Test
         run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq ffmpeg; }
           pip install -r requirements-dev.txt
           python -m pytest -q
 
