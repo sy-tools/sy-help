@@ -87,3 +87,14 @@ def test_validate_flags_a_section_without_a_video_list():
     c = cat(section("guide", []))
     del c["sections"][0]["videos"]
     assert "has no videos list" in "\n".join(catalog.validate(c))
+
+
+def test_validate_refuses_two_videos_sharing_a_name_apart_from_a_version():
+    c = cat(section("guide", [video("intro"), video("intro-v2"), video("intro-2")]))
+    errors = catalog.validate(c)
+    assert errors == ["'intro-v2' shares the name 'intro' with 'intro'; a -vN suffix marks a replacement"]
+
+
+def test_stem_strips_only_a_version_suffix():
+    assert catalog.stem("intro-v12") == "intro"
+    assert catalog.stem("intro-2") == "intro-2"

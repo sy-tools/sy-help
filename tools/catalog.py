@@ -21,6 +21,14 @@ ORDERS = ("manual", "chronological")
 DEFAULT_PATH = "catalog.json"
 
 
+VERSION_SUFFIX_RE = re.compile(r"-v\d+$")
+
+
+def stem(file):
+    """The name apart from its -vN suffix: the video's identity across replacements."""
+    return VERSION_SUFFIX_RE.sub("", file)
+
+
 def loads(text):
     return json.loads(text)
 
@@ -53,6 +61,7 @@ def validate(cat):
     if cat.get("version") != 1:
         errors.append(f"version must be 1, not {cat.get('version')!r}")
     seen = set()
+    stems = {}
     section_ids = set()
     for section in cat.get("sections", []):
         sid = section.get("id")
@@ -73,7 +82,12 @@ def validate(cat):
                 errors.append(f"file {name!r} is not a lowercase slug")
             elif name in seen:
                 errors.append(f"duplicate file '{name}'")
+            elif stem(name) in stems:
+                errors.append(f"'{name}' shares the name '{stem(name)}' with '{stems[stem(name)]}';"
+                              " a -vN suffix marks a replacement")
             seen.add(name)
+            if isinstance(name, str):
+                stems.setdefault(stem(name), name)
             date = v.get("date")
             if order == "chronological" and not date:
                 errors.append(f"'{name}' has no date, which its chronological section sorts by")

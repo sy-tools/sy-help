@@ -104,9 +104,9 @@ def test_page_escapes_catalog_text():
     assert meta(html, "og:title") == "Він сказав &quot;так&quot; &lt;b&gt;&amp;"
 
 
-def make_mp4(path):
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1076:rate=10:duration=1",
-                    "-pix_fmt", "yuv420p", str(path)], check=True)
+def make_mp4(path, source="testsrc=size=1920x1076:rate=10:duration=1"):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", source, "-pix_fmt", "yuv420p", str(path)],
+                   check=True)
 
 
 @pytest.fixture(scope="module")
@@ -124,6 +124,17 @@ def test_extract_frame_writes_a_1200px_jpeg(mp4, tmp_path):
     assert len(data) < share_pages.MAX_IMAGE_BYTES == 300_000
 
 
+def test_extract_frame_fits_a_portrait_video_in_the_box(tmp_path):
+    make_mp4(tmp_path / "tall.mp4", "testsrc=size=1080x2340:rate=10:duration=1")
+    assert share_pages.extract_frame(tmp_path / "tall.mp4", tmp_path / "tall.jpg") == (554, 1200)
+
+
+def test_extract_frame_lowers_quality_before_giving_up(tmp_path):
+    make_mp4(tmp_path / "noise.mp4", "color=gray:size=1920x1076:rate=10:duration=1,noise=alls=60:allf=t")
+    assert share_pages.extract_frame(tmp_path / "noise.mp4", tmp_path / "noise.jpg") == (1200, 672)
+    assert (tmp_path / "noise.jpg").stat().st_size < share_pages.MAX_IMAGE_BYTES
+
+
 def test_extract_frame_fails_on_unreadable_video(tmp_path):
     bad = tmp_path / "broken.mp4"
     bad.write_bytes(os.urandom(4000))
@@ -137,8 +148,8 @@ def test_extract_frame_refuses_an_image_over_the_limit(mp4, tmp_path, monkeypatc
         share_pages.extract_frame(mp4, tmp_path / "intro.jpg")
 
 
-def run_cli(site):
-    return subprocess.run([sys.executable, "-m", "tools.share_pages", "--site", str(site)],
+def run_cli(site, *extra):
+    return subprocess.run([sys.executable, "-m", "tools.share_pages", "--site", str(site), *extra],
                           cwd=ROOT, capture_output=True, text=True)
 
 
@@ -153,14 +164,23 @@ def site_with(tmp_path, files, mp4_for):
 
 
 def test_cli_writes_a_page_and_frame_per_stem(mp4, tmp_path):
-    site = site_with(tmp_path, ["intro", "intro-v2"], lambda p: shutil.copyfile(mp4, p))
+    site = site_with(tmp_path, ["intro-v2", "other"], lambda p: shutil.copyfile(mp4, p))
     result = run_cli(site)
     assert result.returncode == 0, result.stdout + result.stderr
     html = (site / "s" / "intro" / "index.html").read_text(encoding="utf-8")
     assert (site / "s" / "intro" / "intro-v2.jpg").exists()
-    assert not (site / "s" / "intro" / "intro.jpg").exists()
+    assert (site / "s" / "other" / "other.jpg").exists()
     assert meta(html, "og:image") == "https://sy-tools.github.io/sy-help/s/intro/intro-v2.jpg"
     assert meta(html, "og:image:height") == "672"
+
+
+def test_cli_publishes_under_the_given_help_base(mp4, tmp_path):
+    site = site_with(tmp_path, ["intro"], lambda p: shutil.copyfile(mp4, p))
+    result = run_cli(site, "--help-base", "https://me.github.io/help-staging")
+    assert result.returncode == 0, result.stdout + result.stderr
+    html = (site / "s" / "intro" / "index.html").read_text(encoding="utf-8")
+    assert meta(html, "og:url") == "https://me.github.io/help-staging/s/intro/"
+    assert meta(html, "og:image") == "https://me.github.io/help-staging/s/intro/intro.jpg"
 
 
 def test_cli_fails_when_a_frame_cannot_be_made(tmp_path):

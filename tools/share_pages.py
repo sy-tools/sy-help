@@ -27,15 +27,17 @@ from tools import catalog
 HELP_BASE = "https://sy-tools.github.io/sy-help/"
 PORTAL = "https://sy-tools.github.io/sy-subtitles/"
 SITE_NAME = "SY Subtitles"
-FRAME_WIDTH = 1200
+# The frame is fitted into this square: wide enough for a large card, and a
+# portrait recording does not become a strip several screens tall.
+FRAME_BOX = 1200
+# Tried in turn until the image fits MAX_IMAGE_BYTES; a busy frame needs more
+# compression than a screen recording.
+JPEG_QUALITIES = (3, 6, 10, 15)
 # WhatsApp drops the image from a preview when it is much larger than this.
 MAX_IMAGE_BYTES = 300_000
 
 _VERSION_RE = re.compile(r"-v(\d+)$")
-
-
-def stem(file):
-    return _VERSION_RE.sub("", file)
+stem = catalog.stem
 
 
 def _version(file):
@@ -139,12 +141,17 @@ def _run(cmd, what):
 
 
 def extract_frame(mp4, jpg):
-    """Write frame 0 of `mp4` to `jpg`, FRAME_WIDTH wide; return its (width, height)."""
-    _run(["ffmpeg", "-v", "error", "-y", "-i", str(mp4), "-frames:v", "1",
-          "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "3", str(jpg)], f"cannot take a frame from {mp4}")
-    size = Path(jpg).stat().st_size
-    if size >= MAX_IMAGE_BYTES:
-        raise RuntimeError(f"{jpg} is {size} bytes, over the {MAX_IMAGE_BYTES}-byte preview limit")
+    """Write frame 0 of `mp4` to `jpg`, fitted into FRAME_BOX; return its (width, height)."""
+    scale = f"scale={FRAME_BOX}:{FRAME_BOX}:force_original_aspect_ratio=decrease:force_divisible_by=2"
+    for quality in JPEG_QUALITIES:
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(mp4), "-frames:v", "1", "-vf", scale,
+              "-q:v", str(quality), str(jpg)], f"cannot take a frame from {mp4}")
+        size = Path(jpg).stat().st_size
+        if size < MAX_IMAGE_BYTES:
+            break
+    else:
+        raise RuntimeError(f"{jpg} is {size} bytes at the lowest quality, "
+                           f"over the {MAX_IMAGE_BYTES}-byte preview limit")
     out = _run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
                 "-of", "csv=p=0", str(jpg)], f"cannot read the size of {jpg}")
     width, height = out.strip().split(",")
@@ -154,11 +161,12 @@ def extract_frame(mp4, jpg):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--site", default="site", help="the laid-out site: catalog.json and v/<file>.mp4")
-    parser.add_argument("--help-base", default=HELP_BASE)
+    parser.add_argument("--help-base", default=HELP_BASE, help="this site's own Pages URL")
     parser.add_argument("--portal", default=PORTAL)
     args = parser.parse_args(argv)
 
     site = Path(args.site)
+    help_base = args.help_base.rstrip("/") + "/"
     pages = latest_by_stem(catalog.load(site / "catalog.json"))
     try:
         for key, (video, section) in sorted(pages.items()):
@@ -168,7 +176,7 @@ def main(argv=None):
             width, height = extract_frame(site / "v" / f"{video['file']}.mp4", out / image)
             (out / "index.html").write_text(
                 page_html(stem=key, video=video, section=section, image=image, width=width, height=height,
-                          help_base=args.help_base, portal=args.portal),
+                          help_base=help_base, portal=args.portal),
                 encoding="utf-8")
     except RuntimeError as e:
         print(f"::error::{e}")
