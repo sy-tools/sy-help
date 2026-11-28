@@ -87,6 +87,10 @@ def page_description(video, section):
     return " · ".join(p for p in parts if p)
 
 
+# The page forwards by script, never by <meta http-equiv="refresh">: Telegram's
+# crawler follows a meta refresh to the portal, which has no Open Graph tags,
+# and then shows no preview at all. Without JavaScript the visible link does
+# the job.
 _REDIRECT = """var from = new URLSearchParams(location.search), kept = new URLSearchParams();
 ['q', 'f'].forEach(function (k) { if (from.get(k)) kept.set(k, from.get(k)); });
 var qs = kept.toString();
@@ -123,7 +127,6 @@ def page_html(*, stem, video, section, image, width, height, help_base, portal):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 {metas}
-<meta http-equiv="refresh" content="0;url={_esc(target)}">
 <script>{script}</script>
 </head>
 <body>
