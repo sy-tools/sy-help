@@ -69,6 +69,11 @@ def test_description_uses_catalog_text_or_section_and_duration():
     assert share_pages.page_description(video("a", duration=3725), SECTION) == "Як працювати з порталом · 1:02:05 · SY Subtitles"
 
 
+def test_duration_rounds_halves_up_as_the_portal_does():
+    assert share_pages.page_description(video("a", duration=432.5), SECTION) == "Як працювати з порталом · 7:13 · SY Subtitles"
+    assert share_pages.page_description(video("a", duration=642.5), SECTION) == "Як працювати з порталом · 10:43 · SY Subtitles"
+
+
 def test_page_carries_open_graph_tags():
     html = page()
     assert '<html lang="uk">' in html

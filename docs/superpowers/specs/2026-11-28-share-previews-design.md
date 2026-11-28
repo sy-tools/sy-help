@@ -41,7 +41,7 @@ is the file name without its `-vN` suffix. A replaced video (`intro` →
 `intro-v2`) keeps the link; the page always describes the newest version,
 the same rule the portal's `findLinked` applies.
 
-**What `tools.publish` adds to the site, per stem (newest version only):**
+**What `tools/share_pages.py` adds to the site after `tools.publish`, per stem (newest version only):**
 
 - `s/<stem>/<file>.jpg` — frame 0 of `v/<file>.mp4`, scaled to 1200 px wide,
   JPEG, well under WhatsApp's ~300 KB. Named by `<file>`, not by the stem, so a
