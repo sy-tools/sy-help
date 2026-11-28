@@ -14,13 +14,22 @@ portal follows for `#/help/` links. The frame is named by the file, not the
 stem, so a replacement gets a new image URL (a name never changes content).
 """
 
+import argparse
 import html
 import json
 import re
+import subprocess
+import sys
+from pathlib import Path
+
+from tools import catalog
 
 HELP_BASE = "https://sy-tools.github.io/sy-help/"
 PORTAL = "https://sy-tools.github.io/sy-subtitles/"
 SITE_NAME = "SY Subtitles"
+FRAME_WIDTH = 1200
+# WhatsApp drops the image from a preview when it is much larger than this.
+MAX_IMAGE_BYTES = 300_000
 
 _VERSION_RE = re.compile(r"-v(\d+)$")
 
@@ -120,3 +129,52 @@ def page_html(*, stem, video, section, image, width, height, help_base, portal):
 </body>
 </html>
 """
+
+
+def _run(cmd, what):
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"{what}: {result.stderr.strip() or 'exit ' + str(result.returncode)}")
+    return result.stdout
+
+
+def extract_frame(mp4, jpg):
+    """Write frame 0 of `mp4` to `jpg`, FRAME_WIDTH wide; return its (width, height)."""
+    _run(["ffmpeg", "-v", "error", "-y", "-i", str(mp4), "-frames:v", "1",
+          "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "3", str(jpg)], f"cannot take a frame from {mp4}")
+    size = Path(jpg).stat().st_size
+    if size >= MAX_IMAGE_BYTES:
+        raise RuntimeError(f"{jpg} is {size} bytes, over the {MAX_IMAGE_BYTES}-byte preview limit")
+    out = _run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                "-of", "csv=p=0", str(jpg)], f"cannot read the size of {jpg}")
+    width, height = out.strip().split(",")
+    return int(width), int(height)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--site", default="site", help="the laid-out site: catalog.json and v/<file>.mp4")
+    parser.add_argument("--help-base", default=HELP_BASE)
+    parser.add_argument("--portal", default=PORTAL)
+    args = parser.parse_args(argv)
+
+    site = Path(args.site)
+    pages = latest_by_stem(catalog.load(site / "catalog.json"))
+    try:
+        for key, (video, section) in sorted(pages.items()):
+            out = site / "s" / key
+            out.mkdir(parents=True, exist_ok=True)
+            image = f"{video['file']}.jpg"
+            width, height = extract_frame(site / "v" / f"{video['file']}.mp4", out / image)
+            (out / "index.html").write_text(
+                page_html(stem=key, video=video, section=section, image=image, width=width, height=height,
+                          help_base=args.help_base, portal=args.portal),
+                encoding="utf-8")
+    except RuntimeError as e:
+        print(f"::error::{e}")
+        sys.exit(1)
+    print(f"share pages: {len(pages)}")
+
+
+if __name__ == "__main__":
+    main()

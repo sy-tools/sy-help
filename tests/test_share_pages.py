@@ -1,6 +1,15 @@
+import json
+import os
 import re
+import shutil
+import subprocess
+import sys
+
+import pytest
 
 from tools import share_pages
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SECTION = {"id": "guide", "title": {"uk": "Як працювати з порталом", "en": "How to work"}, "order": "manual"}
 
@@ -93,3 +102,70 @@ def test_page_escapes_catalog_text():
     html = page(video=video("intro-v2", title={"uk": 'Він сказав "так" <b>&'}))
     assert "<b>" not in html
     assert meta(html, "og:title") == "Він сказав &quot;так&quot; &lt;b&gt;&amp;"
+
+
+def make_mp4(path):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1076:rate=10:duration=1",
+                    "-pix_fmt", "yuv420p", str(path)], check=True)
+
+
+@pytest.fixture(scope="module")
+def mp4(tmp_path_factory):
+    path = tmp_path_factory.mktemp("video") / "intro.mp4"
+    make_mp4(path)
+    return path
+
+
+def test_extract_frame_writes_a_1200px_jpeg(mp4, tmp_path):
+    jpg = tmp_path / "intro.jpg"
+    assert share_pages.extract_frame(mp4, jpg) == (1200, 672)
+    data = jpg.read_bytes()
+    assert data[:2] == b"\xff\xd8"
+    assert len(data) < share_pages.MAX_IMAGE_BYTES == 300_000
+
+
+def test_extract_frame_fails_on_unreadable_video(tmp_path):
+    bad = tmp_path / "broken.mp4"
+    bad.write_bytes(os.urandom(4000))
+    with pytest.raises(RuntimeError, match="broken.mp4"):
+        share_pages.extract_frame(bad, tmp_path / "broken.jpg")
+
+
+def test_extract_frame_refuses_an_image_over_the_limit(mp4, tmp_path, monkeypatch):
+    monkeypatch.setattr(share_pages, "MAX_IMAGE_BYTES", 100)
+    with pytest.raises(RuntimeError, match="intro.jpg"):
+        share_pages.extract_frame(mp4, tmp_path / "intro.jpg")
+
+
+def run_cli(site):
+    return subprocess.run([sys.executable, "-m", "tools.share_pages", "--site", str(site)],
+                          cwd=ROOT, capture_output=True, text=True)
+
+
+def site_with(tmp_path, files, mp4_for):
+    site = tmp_path / "site"
+    (site / "v").mkdir(parents=True)
+    (site / "catalog.json").write_text(
+        json.dumps(catalog(dict(SECTION, videos=[video(f) for f in files]))), encoding="utf-8")
+    for f in files:
+        mp4_for(site / "v" / f"{f}.mp4")
+    return site
+
+
+def test_cli_writes_a_page_and_frame_per_stem(mp4, tmp_path):
+    site = site_with(tmp_path, ["intro", "intro-v2"], lambda p: shutil.copyfile(mp4, p))
+    result = run_cli(site)
+    assert result.returncode == 0, result.stdout + result.stderr
+    html = (site / "s" / "intro" / "index.html").read_text(encoding="utf-8")
+    assert (site / "s" / "intro" / "intro-v2.jpg").exists()
+    assert not (site / "s" / "intro" / "intro.jpg").exists()
+    assert meta(html, "og:image") == "https://sy-tools.github.io/sy-help/s/intro/intro-v2.jpg"
+    assert meta(html, "og:image:height") == "672"
+
+
+def test_cli_fails_when_a_frame_cannot_be_made(tmp_path):
+    site = site_with(tmp_path, ["broken"], lambda p: p.write_bytes(os.urandom(4000)))
+    result = run_cli(site)
+    assert result.returncode == 1
+    assert "::error::" in result.stdout
+    assert "broken.mp4" in result.stdout
