@@ -1,0 +1,95 @@
+import re
+
+from tools import share_pages
+
+SECTION = {"id": "guide", "title": {"uk": "Як працювати з порталом", "en": "How to work"}, "order": "manual"}
+
+
+def video(file, **extra):
+    v = {"file": file, "title": {"uk": file, "en": file}}
+    v.update(extra)
+    return v
+
+
+def catalog(*sections):
+    return {"version": 1, "sections": list(sections)}
+
+
+def meta(html, prop):
+    m = re.search(r'<meta (?:property|name)="%s" content="([^"]*)">' % re.escape(prop), html)
+    assert m, f"no meta {prop} in page"
+    return m.group(1)
+
+
+def page(**overrides):
+    args = dict(stem="intro", video=video("intro-v2", title={"uk": "Вступ"}, duration=335.9),
+                section=SECTION, image="intro-v2.jpg", width=1200, height=672,
+                help_base=share_pages.HELP_BASE, portal=share_pages.PORTAL)
+    args.update(overrides)
+    return share_pages.page_html(**args)
+
+
+def test_stem_strips_version_suffix():
+    assert share_pages.stem("intro-v2") == "intro"
+    assert share_pages.stem("intro") == "intro"
+    assert share_pages.stem("v2-intro") == "v2-intro"
+
+
+def test_latest_by_stem_keeps_newest_version():
+    other = dict(SECTION, id="other", videos=[video("other")])
+    cat = catalog(dict(SECTION, videos=[video("intro"), video("intro-v3"), video("intro-v2")]), other)
+    out = share_pages.latest_by_stem(cat)
+    assert set(out) == {"intro", "other"}
+    v, section = out["intro"]
+    assert v["file"] == "intro-v3"
+    assert section["id"] == "guide"
+    assert out["other"][1]["id"] == "other"
+
+
+def test_title_falls_back_to_update_date():
+    assert share_pages.page_title(video("u", date="2026-11-23", title={"uk": ""})) == "Оновлення на 23.11.2026"
+    assert share_pages.page_title({"file": "u"}) == "u"
+    assert share_pages.page_title(video("intro", title={"uk": "Вступ"})) == "Вступ"
+
+
+def test_description_uses_catalog_text_or_section_and_duration():
+    assert share_pages.page_description(video("a", description={"uk": "Текст"}), SECTION) == "Текст"
+    assert (share_pages.page_description(video("a", description={"uk": ""}, duration=335.9), SECTION)
+            == "Як працювати з порталом · 5:36 · SY Subtitles")
+    assert share_pages.page_description(video("a"), SECTION) == "Як працювати з порталом · SY Subtitles"
+    assert share_pages.page_description(video("a", duration=3725), SECTION) == "Як працювати з порталом · 1:02:05 · SY Subtitles"
+
+
+def test_page_carries_open_graph_tags():
+    html = page()
+    assert '<html lang="uk">' in html
+    assert "<title>Вступ</title>" in html
+    assert meta(html, "og:title") == "Вступ"
+    assert meta(html, "og:description") == "Як працювати з порталом · 5:36 · SY Subtitles"
+    assert meta(html, "og:image") == "https://sy-tools.github.io/sy-help/s/intro/intro-v2.jpg"
+    assert meta(html, "og:image:width") == "1200"
+    assert meta(html, "og:image:height") == "672"
+    assert meta(html, "og:image:type") == "image/jpeg"
+    assert meta(html, "og:url") == "https://sy-tools.github.io/sy-help/s/intro/"
+    assert meta(html, "og:type") == "website"
+    assert meta(html, "og:site_name") == "SY Subtitles"
+    assert meta(html, "twitter:card") == "summary_large_image"
+    assert meta(html, "robots") == "noindex"
+
+
+def test_page_redirects_to_portal_help_route():
+    html = page()
+    target = "https://sy-tools.github.io/sy-subtitles/#/help/intro"
+    assert f'<meta http-equiv="refresh" content="0;url={target}">' in html
+    assert f'<a href="{target}">' in html
+    script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+    assert "URLSearchParams" in script
+    assert "['q', 'f']" in script
+    assert '"https://sy-tools.github.io/sy-subtitles/"' in script
+    assert '"intro"' in script
+
+
+def test_page_escapes_catalog_text():
+    html = page(video=video("intro-v2", title={"uk": 'Він сказав "так" <b>&'}))
+    assert "<b>" not in html
+    assert meta(html, "og:title") == "Він сказав &quot;так&quot; &lt;b&gt;&amp;"
